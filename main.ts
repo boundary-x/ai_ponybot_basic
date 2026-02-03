@@ -1077,29 +1077,52 @@ namespace aiPonybot {
     }
 
     // ---------------------------------------------------
+    // [New Block] Data Validation (유효성 검사)
+    // 데이터가 너무 짧거나(줄바꿈 문자 등), 형식이 안 맞으면 false 반환
+    // ---------------------------------------------------
+    //% group="AI 데이터 파싱"
+    //% block="[Hand Pose] %data 가 유효한가?"
+    //% weight=95
+    export function isHandPoseData(data: string): boolean {
+        // 1. 데이터가 없으면 거짓
+        if (!data) return false;
+
+        // 2. 앞뒤 공백(줄바꿈 문자 \n 포함) 제거
+        let clean = data.trim();
+
+        // 3. 길이가 너무 짧으면(5글자 미만) 거짓 (예: 빈 줄바꿈 등 필터링)
+        if (clean.length < 5) return false;
+
+        // 4. L과 R이 모두 포함되어 있어야 진짜 데이터
+        if (clean.indexOf("L") < 0 || clean.indexOf("R") < 0) return false;
+
+        return true;
+    }
+
+    // ---------------------------------------------------
     // [Block 1] Hand Pose Parsing (RC Controller)
     // Format: L{Dir}{Speed}R{Dir}{Speed} (e.g., LF255RB200)
     // ---------------------------------------------------
     //% group="AI 데이터 활용"
-    //% block="[AI 모션인식] 수신값 %data 에서 %hand 의 %attr 추출"
+    //% block="[Hand Pose] 수신값 %data 에서 %hand 의 %attr 추출"
     //% weight=90
     export function parseHandPose(data: string, hand: HandType, attr: HandAttribute): number {
-        if (!data || data.length < 5) return 0;
-
+        if (!data) return 0;
+        let clean = data.trim(); // 공백/줄바꿈 제거
+        if (clean.length < 5) return 0;
+        
         // 1. Find Start Index (L or R)
-        let startIndex = (hand === HandType.Left) ? data.indexOf("L") : data.indexOf("R");
+        let startIndex = (hand === HandType.Left) ? clean.indexOf("L") : clean.indexOf("R");
         if (startIndex === -1) return 0;
 
         // 2. Parse Direction or Speed
         if (attr === HandAttribute.Direction) {
-            // L 바로 다음 글자가 방향 (F or B)
-            let dirChar = data.charAt(startIndex + 1);
-            if (dirChar === "F") return 1;       // Forward -> 1
-            if (dirChar === "B") return -1;      // Backward -> -1
-            return 0;
+            let dirChar = clean.charAt(startIndex + 1);
+            if (dirChar === "F") return 1;
+            if (dirChar === "B") return -1;
+            return 0; 
         } else {
-            // L + 2번째 글자부터 3글자가 속도 (000~255)
-            let speedStr = data.substr(startIndex + 2, 3);
+            let speedStr = clean.substr(startIndex + 2, 3);
             let speed = parseInt(speedStr);
             return isNaN(speed) ? 0 : speed;
         }
