@@ -1004,52 +1004,63 @@ namespace aiPonybot {
         clear();
     }
 
-    //% group="AI 데이터 활용"
-    //% block="블루투스 수신 값: %data 에서 %type 을 %format 으로 추출"
-    //% inlineInputMode=inline
-    //% weight=70
-    export function parseUARTUnified(data: string, type: UARTDataType, format: ReturnFormat): any {
-        if (data == "null" || data == "stop") {
-            return format == ReturnFormat.String ? data : -1
-        }
+    /**
+         * ==========================================
+         * Boundary X - AI Data Parsing Extension (Updated)
+         * ==========================================
+         */
 
-        let v = getValue(data, uartKey(type))
-
-        if (format == ReturnFormat.String) return v
-        let num = parseInt(v)
-        return isNaN(num) ? -1 : num
+    // 1. Hand Pose (RC Car) Enums
+    export enum HandType {
+        //% block="왼손(L)"
+        Left,
+        //% block="오른손(R)"
+        Right
     }
 
-    //% group="AI 데이터 활용"
-    //% block="블루투스 수신 값: %data 에서 %color 을 %format 으로 추출"
-    //% inlineInputMode=inline
-    //% weight=69
-    export function parseColorUnified(data: string, color: ColorDataType, format: ReturnFormat): any {
-        if (data == "stop") {
-            return format == ReturnFormat.String ? data : -1
-        }
-
-        let v = getValue(data, colorKey(color))
-
-        if (format == ReturnFormat.String) return v
-        let num = parseInt(v)
-        return isNaN(num) ? -1 : num
+    export enum HandAttribute {
+        //% block="방향(1:전진, -1:후진)"
+        Direction,
+        //% block="속도(0~255)"
+        Speed
     }
 
-    function getValue(data: string, key: string): string {
-        let start = data.indexOf(key)
-        if (start < 0) return ""
-        let end = data.length
-        const keys = ["x", "y", "w", "h", "d", "R", "G", "B", "\n"]
-        for (let k of keys) {
-            if (k != key) {
-                const i = data.indexOf(k, start + 1)
-                if (i >= 0 && i < end) {
-                    end = i
-                }
-            }
-        }
-        return data.substr(start + 1, end - start - 1)
+    // 2. Face Mesh Enums (Index Mapping)
+    export enum FaceAttribute {
+        //% block="X 좌표(0~99)"
+        X = 0,
+        //% block="Y 좌표(0~99)"
+        Y = 2,
+        //% block="거리 Z(0~99)"
+        Z = 4,
+        //% block="고개 회전(Yaw)"
+        Yaw = 6,
+        //% block="고개 숙임(Pitch)"
+        Pitch = 8,
+        //% block="입 벌림(Mouth)"
+        Mouth = 10,
+        //% block="왼쪽 눈(L-Eye)"
+        LeftEye = 12,
+        //% block="오른쪽 눈(R-Eye)"
+        RightEye = 14,
+        //% block="고개 기울기(Roll)"
+        Roll = 16,
+        //% block="미소(Smile)"
+        Smile = 17,
+        //% block="인식 여부(Vis)"
+        Vis = 18
+    }
+
+    // 3. Color / Object Data Enums
+    export enum AIColorKey {
+        //% block="클래스 ID (I)"
+        ID,
+        //% block="빨간색 (R)"
+        Red,
+        //% block="초록색 (G)"
+        Green,
+        //% block="파란색 (B)"
+        Blue
     }
 
     export enum UARTDataType {
@@ -1065,40 +1076,124 @@ namespace aiPonybot {
         D
     }
 
-    export enum ColorDataType {
-        //% block="빨간색(R)"
-        R,
-        //% block="초록색(G)"
-        G,
-        //% block="파랑색(B)"
-        B
+    // ---------------------------------------------------
+    // [Block 1] Hand Pose Parsing (RC Controller)
+    // Format: L{Dir}{Speed}R{Dir}{Speed} (e.g., LF255RB200)
+    // ---------------------------------------------------
+    //% group="AI 데이터 활용"
+    //% block="[AI 모션인식] 수신값 %data 에서 %hand 의 %attr 추출"
+    //% weight=90
+    export function parseHandPose(data: string, hand: HandType, attr: HandAttribute): number {
+        if (!data || data.length < 5) return 0;
+
+        // 1. Find Start Index (L or R)
+        let startIndex = (hand === HandType.Left) ? data.indexOf("L") : data.indexOf("R");
+        if (startIndex === -1) return 0;
+
+        // 2. Parse Direction or Speed
+        if (attr === HandAttribute.Direction) {
+            // L 바로 다음 글자가 방향 (F or B)
+            let dirChar = data.charAt(startIndex + 1);
+            if (dirChar === "F") return 1;       // Forward -> 1
+            if (dirChar === "B") return -1;      // Backward -> -1
+            return 0;
+        } else {
+            // L + 2번째 글자부터 3글자가 속도 (000~255)
+            let speedStr = data.substr(startIndex + 2, 3);
+            let speed = parseInt(speedStr);
+            return isNaN(speed) ? 0 : speed;
+        }
     }
 
-    export enum ReturnFormat {
-        //% block="문자형"
-        String,
-        //% block="정수형"
-        Number
+    // ---------------------------------------------------
+    // [Block 2] Face Mesh Parsing
+    // Format: 19 digits fixed (e.g., 5050605050009999501)
+    // ---------------------------------------------------
+    //% group="AI 데이터 활용"
+    //% block="[AI 얼굴인식] 수신값 %data 에서 %attr 추출"
+    //% weight=80
+    export function parseFaceMesh(data: string, attr: FaceAttribute): number {
+        // 데이터 길이 검증 (최소 19자리)
+        if (!data || data.length < 19) return -1;
+
+        // 마지막 3개 속성(Roll, Smile, Vis)은 1자리, 나머지는 2자리
+        let length = (attr >= 16) ? 1 : 2;
+
+        // 해당 인덱스에서 잘라내기
+        let valueStr = data.substr(attr, length);
+        let val = parseInt(valueStr);
+
+        return isNaN(val) ? -1 : val;
     }
 
-    function uartKey(type: UARTDataType): string {
+    // ---------------------------------------------------
+    // [Block 3] Color Recognition Parsing
+    // Format: I{ID}R{Red}G{Green}B{Blue}
+    // ---------------------------------------------------
+    //% group="AI 데이터 활용"
+    //% block="[AI 컬러인식] 수신값 %data 에서 %key 값 추출"
+    //% weight=70
+    export function parseColorExtended(data: string, key: AIColorKey): number {
+        if (data === "stop") return -1;
+
+        let charKey = "";
+        switch (key) {
+            case AIColorKey.ID: charKey = "I"; break;
+            case AIColorKey.Red: charKey = "R"; break;
+            case AIColorKey.Green: charKey = "G"; break;
+            case AIColorKey.Blue: charKey = "B"; break;
+        }
+
+        let val = getValue(data, charKey);
+        return val === "" ? -1 : parseInt(val);
+    }
+
+    // ---------------------------------------------------
+    // [Block 4] Object Recognition Parsing
+    // Format: x{X}y{Y}w{W}h{H}d{Count}
+    // ---------------------------------------------------
+    //% group="AI 데이터 활용"
+    //% block="[AI 사물인식] 수신값 %data 에서 %type 추출"
+    //% weight=60
+    export function parseObjectData(data: string, type: UARTDataType): number {
+        if (data === "stop" || data === "null") return -1;
+
+        let charKey = "";
         switch (type) {
-            case UARTDataType.X: return "x"
-            case UARTDataType.Y: return "y"
-            case UARTDataType.W: return "w"
-            case UARTDataType.H: return "h"
-            case UARTDataType.D: return "d"
-            default: return ""
+            case UARTDataType.X: charKey = "x"; break;
+            case UARTDataType.Y: charKey = "y"; break;
+            case UARTDataType.W: charKey = "w"; break;
+            case UARTDataType.H: charKey = "h"; break;
+            case UARTDataType.D: charKey = "d"; break;
         }
+
+        let val = getValue(data, charKey);
+        return val === "" ? -1 : parseInt(val);
     }
 
-    function colorKey(color: ColorDataType): string {
-        switch (color) {
-            case ColorDataType.R: return "R"
-            case ColorDataType.G: return "G"
-            case ColorDataType.B: return "B"
-            default: return ""
+    /**
+     * [Core Helper] 문자열 파싱 엔진
+     * 키(Key)와 다음 키(Next Key) 사이의 값을 추출합니다.
+     */
+    function getValue(data: string, key: string): string {
+        let start = data.indexOf(key);
+        if (start < 0) return "";
+
+        let end = data.length;
+        // [중요] 구분자로 인식할 모든 키를 여기에 등록해야 함
+        // 기존 코드에는 I, L, R 등이 빠져 있었음
+        const keys = ["x", "y", "w", "h", "d", "R", "G", "B", "I", "L", "R", "\n"];
+
+        for (let k of keys) {
+            if (k != key) {
+                // 현재 키 뒤에 등장하는 가장 가까운 구분자 찾기
+                const i = data.indexOf(k, start + 1);
+                if (i >= 0 && i < end) {
+                    end = i;
+                }
+            }
         }
+        return data.substr(start + 1, end - start - 1);
     }
 
     export namespace smbus {
