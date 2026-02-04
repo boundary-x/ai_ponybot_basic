@@ -1004,16 +1004,20 @@ namespace aiPonybot {
         clear();
     }
 
-/**
+//% weight=10 color=#58ACFA icon="\uf057" block="AI ponybot"
+namespace aiPonybot {
+    // ... (기존 모터/센서/OLED 코드는 그대로 두시고, [AI 데이터 인식] 부분만 아래로 교체하세요) ...
+
+    /**
      * ==========================================
-     * Boundary X - AI Data Parsing Extension (Complete)
+     * Boundary X - AI Data Parsing (Stable Version)
+     * 사용자 검증 로직(charAt, substr) 적용
      * ==========================================
      */
 
     // ------------------------------------------
-    // 1. Enums (블록 메뉴 정의)
+    // 1. Enums
     // ------------------------------------------
-
     export enum HandType {
         //% block="왼손(L)"
         Left,
@@ -1029,199 +1033,117 @@ namespace aiPonybot {
     }
 
     export enum FaceAttribute {
-        //% block="미소 (Smile, 0~9)"
-        Smile = 17,
-        //% block="고개 숙임 (Pitch, 00~99)"
-        Pitch = 8,
-        //% block="고개 도리도리 (Yaw, 00~99)"
-        Yaw = 6,
-        //% block="고개 까딱 (Roll, 0~9)"
-        Roll = 16,
-        //% block="입 벌림 (Mouth, 00~99)"
-        Mouth = 10,
-        //% block="왼쪽 눈 (L-Eye, 00~99)"
-        LeftEye = 12,
-        //% block="오른쪽 눈 (R-Eye, 00~99)"
-        RightEye = 14,
-        //% block="거리 (Z, 00~99)"
-        Z = 4,
-        //% block="X 좌표 (00~99)"
-        X = 0,
-        //% block="Y 좌표 (00~99)"
-        Y = 2,
-        //% block="얼굴 감지 여부 (Vis, 0/1)"
-        Vis = 18
+        Smile = 17, Pitch = 8, Yaw = 6, Roll = 16, Mouth = 10,
+        LeftEye = 12, RightEye = 14, Z = 4, X = 0, Y = 2, Vis = 18
     }
 
-    export enum AIColorKey {
-        //% block="클래스 ID (I)"
-        ID,
-        //% block="빨간색 (R)"
-        Red,
-        //% block="초록색 (G)"
-        Green,
-        //% block="파란색 (B)"
-        Blue
-    }
-
-    export enum UARTDataType {
-        //% block="X 좌표 (x)"
-        X,
-        //% block="Y 좌표 (y)"
-        Y,
-        //% block="너비 (w)"
-        W,
-        //% block="높이 (h)"
-        H,
-        //% block="객체 수 (d)"
-        D
-    }
+    export enum AIColorKey { ID, Red, Green, Blue }
+    export enum UARTDataType { X, Y, W, H, D }
 
     // ------------------------------------------
-    // 2. Hand Pose (RC Car) - 고정 인덱싱 방식
+    // 2. Hand Pose (RC Car) - 안정화된 로직
     // ------------------------------------------
 
     //% group="AI 데이터 인식"
-    //% block="[AI 모션인식] %data 가 유효한가?"
+    //% block="[AI 모션제어] %data 가 유효한가?"
     //% weight=95
     export function isHandPoseData(data: string): boolean {
-        if (!data) return false;
-        let clean = data.trim();
-        // 포맷: LFnnnRFnnn (10글자 이상, L로 시작)
-        return clean.length >= 10 && clean.charAt(0) == "L";
+        // 사용자의 "잘 되는 코드" 로직: 길이 10 이상이면 OK
+        // (L로 시작하는지 체크하면 더 좋지만, 데이터가 살짝 깨져도 동작하게 하려면 길이 체크가 우선입니다)
+        return data != null && data.length >= 10 && data.charAt(0) == "L";
     }
 
     //% group="AI 데이터 인식"
-    //% block="[AI 모션인식] 블루투스 수신값: %data 에서 %hand 의 %attr 추출"
+    //% block="[AI 모션제어] 블루투스 수신값: %data 에서 %hand 의 %attr 추출"
     //% weight=94
     export function parseHandPose(data: string, hand: HandType, attr: HandAttribute): number {
-        if (!data) return 0;
-        let clean = data.trim();
-        if (clean.length < 10) return 0;
+        // 데이터가 없거나 짧으면 0 반환
+        if (!data || data.length < 10) return 0;
 
-        // 왼손(L)은 0번 인덱스부터, 오른손(R)은 5번 인덱스부터 시작
+        // 인덱스 고정: 왼손(L)은 0, 오른손(R)은 5
+        // (trim()을 쓰지 않아 원본 인덱스를 보존합니다)
         let startIndex = (hand === HandType.Left) ? 0 : 5;
 
         if (attr === HandAttribute.Direction) {
-            let dirChar = clean.charAt(startIndex + 1);
+            // L/R 바로 뒷글자 (인덱스 + 1)
+            let dirChar = data.charAt(startIndex + 1);
             if (dirChar === "F") return 1;
             if (dirChar === "B") return -1;
-            return 0;
+            return 0; // F나 B가 아니면 정지
         } else {
-            let speedStr = clean.substr(startIndex + 2, 3);
-            let speed = parseInt(speedStr);
-            return isNaN(speed) ? 0 : speed;
+            // 속도: 방향 뒷글자부터 3글자 (인덱스 + 2)
+            let speedStr = data.substr(startIndex + 2, 3);
+            let val = parseInt(speedStr);
+            return isNaN(val) ? 0 : val;
         }
     }
 
     // ------------------------------------------
-    // 3. Face Mesh - 고정 인덱싱 방식
+    // 3. Face Mesh
     // ------------------------------------------
-
     //% group="AI 데이터 인식"
     //% block="[AI 얼굴인식] %data 가 유효한가?"
-    //% weight=85
     export function isFaceData(data: string): boolean {
-        if (!data) return false;
-        let clean = data.trim();
-        // 포맷: 19자리 숫자
-        return clean.length == 19 && !isNaN(parseInt(clean));
+        return data != null && data.length >= 19;
     }
 
     //% group="AI 데이터 인식"
     //% block="[AI 얼굴인식] 블루투스 수신값: %data 에서 %attr 추출"
-    //% weight=84
     export function parseFaceMesh(data: string, attr: FaceAttribute): number {
         if (!data || data.length < 19) return -1;
-        // Roll(16), Smile(17), Vis(18)은 1자리, 나머지는 2자리
         let length = (attr >= 16) ? 1 : 2; 
-        let val = parseInt(data.substr(attr, length));
-        return isNaN(val) ? -1 : val;
+        return parseInt(data.substr(attr, length)) || -1;
     }
 
     // ------------------------------------------
-    // 4. Color Recognition - 키워드 검색 방식 (가변 길이 대응)
+    // 4. Color / Object (가변 길이 대응)
     // ------------------------------------------
-
-    //% group="AI 데이터 활용"
+    //% group="AI 데이터 인식"
     //% block="[AI 컬러인식] %data 가 유효한가?"
-    //% weight=75
     export function isColorData(data: string): boolean {
-        if (!data) return false;
-        let clean = data.trim();
-        // 포맷: I로 시작해야 함
-        return clean.charAt(0) == "I";
+        return data != null && data.charAt(0) == "I";
     }
 
-    //% group="AI 데이터 활용"
+    //% group="AI 데이터 인식"
     //% block="[AI 컬러인식] 블루투스 수신값: %data 에서 %key 값 추출"
-    //% weight=74
     export function parseColorExtended(data: string, key: AIColorKey): number {
         if (data === "stop") return -1;
         let charKey = "";
-        switch(key){ 
-            case AIColorKey.ID: charKey="I"; break; 
-            case AIColorKey.Red: charKey="R"; break; 
-            case AIColorKey.Green: charKey="G"; break; 
-            case AIColorKey.Blue: charKey="B"; break; 
-        }
+        switch(key){ case AIColorKey.ID: charKey="I"; break; case AIColorKey.Red: charKey="R"; break; case AIColorKey.Green: charKey="G"; break; case AIColorKey.Blue: charKey="B"; break; }
         let val = getValue(data, charKey);
         return val === "" ? -1 : parseInt(val);
     }
 
-    // ------------------------------------------
-    // 5. Object Recognition - 키워드 검색 방식 (가변 길이 대응)
-    // ------------------------------------------
-
-    //% group="AI 데이터 활용"
+    //% group="AI 데이터 인식"
     //% block="[AI 사물인식] %data 가 유효한가?"
-    //% weight=65
     export function isObjectData(data: string): boolean {
-        if (!data) return false;
-        let clean = data.trim();
-        // 포맷: x로 시작해야 함
-        return clean.charAt(0) == "x";
+        return data != null && data.charAt(0) == "x";
     }
 
-    //% group="AI 데이터 활용"
+    //% group="AI 데이터 인식"
     //% block="[AI 사물인식] 블루투스 수신값: %data 에서 %type 값 추출"
-    //% weight=64
     export function parseObjectData(data: string, type: UARTDataType): number {
         if (data === "stop" || data === "null") return -1;
         let charKey = "";
-        switch(type){ 
-            case UARTDataType.X: charKey="x"; break; 
-            case UARTDataType.Y: charKey="y"; break; 
-            case UARTDataType.W: charKey="w"; break; 
-            case UARTDataType.H: charKey="h"; break; 
-            case UARTDataType.D: charKey="d"; break; 
-        }
+        switch(type){ case UARTDataType.X: charKey="x"; break; case UARTDataType.Y: charKey="y"; break; case UARTDataType.W: charKey="w"; break; case UARTDataType.H: charKey="h"; break; case UARTDataType.D: charKey="d"; break; }
         let val = getValue(data, charKey);
         return val === "" ? -1 : parseInt(val);
     }
 
-    /**
-     * [Helper] 문자열 내에서 특정 키(Key) 뒤의 숫자를 찾아냅니다.
-     * 예: "x200y150" 에서 "x"를 찾으면 "200" 반환
-     */
     function getValue(data: string, key: string): string {
         let start = data.indexOf(key);
         if (start < 0) return "";
-        
         let end = data.length;
-        // 구분자 목록 (모든 서비스의 키 포함)
         const keys = ["x", "y", "w", "h", "d", "R", "G", "B", "I", "L", "\n"];
-        
         for (let k of keys) {
             if (k != key) {
                 let i = data.indexOf(k, start + 1);
-                if (i >= 0 && i < end) {
-                    end = i;
-                }
+                if (i >= 0 && i < end) end = i;
             }
         }
         return data.substr(start + 1, end - start - 1);
     }
+}
 
     export namespace smbus {
         export function writeByte(address: number, register: number, value: number): void {
