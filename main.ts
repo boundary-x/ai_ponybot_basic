@@ -1004,7 +1004,7 @@ namespace aiPonybot {
         clear();
     }
 
-    /**
+/**
      * ==========================================
      * Boundary X - AI Data Parsing (Stable Version)
      * 사용자 검증 로직(charAt, substr) 적용
@@ -1041,7 +1041,7 @@ namespace aiPonybot {
     // ------------------------------------------
 
     //% group="AI 데이터 활용"
-    //% block="[AI 모션제어] %data 가 유효한가?"
+    //% block="[AI 모션인식] %data 가 유효한가?"
     //% weight=95
     export function isHandPoseData(data: string): boolean {
         // 사용자의 "잘 되는 코드" 로직: 길이 10 이상이면 OK
@@ -1050,7 +1050,7 @@ namespace aiPonybot {
     }
 
     //% group="AI 데이터 활용"
-    //% block="[AI 모션제어] 블루투스 수신값: %data 에서 %hand 의 %attr 추출"
+    //% block="[AI 모션인식] 블루투스 수신값 : : %data 에서 %hand 의 %attr 추출"
     //% weight=94
     export function parseHandPose(data: string, hand: HandType, attr: HandAttribute): number {
         // 데이터가 없거나 짧으면 0 반환
@@ -1077,14 +1077,14 @@ namespace aiPonybot {
     // ------------------------------------------
     // 3. Face Mesh
     // ------------------------------------------
-    //% group="AI 데이터 인식"
+    //% group="AI 데이터 활용"
     //% block="[AI 얼굴인식] %data 가 유효한가?"
     export function isFaceData(data: string): boolean {
         return data != null && data.length >= 19;
     }
 
-    //% group="AI 데이터 인식"
-    //% block="[AI 얼굴인식] 블루투스 수신값: %data 에서 %attr 추출"
+    //% group="AI 데이터 활용"
+    //% block="[AI 얼굴인식] 블루투스 수신값 : %data 에서 %attr 추출"
     export function parseFaceMesh(data: string, attr: FaceAttribute): number {
         if (!data || data.length < 19) return -1;
         let length = (attr >= 16) ? 1 : 2; 
@@ -1094,14 +1094,14 @@ namespace aiPonybot {
     // ------------------------------------------
     // 4. Color / Object (가변 길이 대응)
     // ------------------------------------------
-    //% group="AI 데이터 인식"
+    //% group="AI 데이터 활용"
     //% block="[AI 컬러인식] %data 가 유효한가?"
     export function isColorData(data: string): boolean {
         return data != null && data.charAt(0) == "I";
     }
 
-    //% group="AI 데이터 인식"
-    //% block="[AI 컬러인식] 블루투스 수신값: %data 에서 %key 값 추출"
+    //% group="AI 데이터 활용"
+    //% block="[AI 컬러인식] 블루투스 수신값 : %data 에서 %key 값 추출"
     export function parseColorExtended(data: string, key: AIColorKey): number {
         if (data === "stop") return -1;
         let charKey = "";
@@ -1110,14 +1110,14 @@ namespace aiPonybot {
         return val === "" ? -1 : parseInt(val);
     }
 
-    //% group="AI 데이터 인식"
+    //% group="AI 데이터 활용"
     //% block="[AI 사물인식] %data 가 유효한가?"
     export function isObjectData(data: string): boolean {
         return data != null && data.charAt(0) == "x";
     }
 
-    //% group="AI 데이터 인식"
-    //% block="[AI 사물인식] 블루투스 수신값: %data 에서 %type 값 추출"
+    //% group="AI 데이터 활용"
+    //% block="[AI 사물인식] 블루투스 수신값 : %data 에서 %type 값 추출"
     export function parseObjectData(data: string, type: UARTDataType): number {
         if (data === "stop" || data === "null") return -1;
         let charKey = "";
