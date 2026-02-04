@@ -1004,8 +1004,8 @@ namespace aiPonybot {
         clear();
     }
 
-    //% group="AI 데이터 활용"
-    //% block="블루투스 수신 값: %data 에서 %type 을 %format 으로 추출"
+//% group="AI 데이터 활용"
+    //% block="블루투스 수신 값: %data 에서 사물 %type 을 %format 으로 추출"
     //% inlineInputMode=inline
     //% weight=70
     export function parseUARTUnified(data: string, type: UARTDataType, format: ReturnFormat): any {
@@ -1021,7 +1021,7 @@ namespace aiPonybot {
     }
 
     //% group="AI 데이터 활용"
-    //% block="블루투스 수신 값: %data 에서 %color 을 %format 으로 추출"
+    //% block="블루투스 수신 값: %data 에서 컬러 %color 을 %format 으로 추출"
     //% inlineInputMode=inline
     //% weight=69
     export function parseColorUnified(data: string, color: ColorDataType, format: ReturnFormat): any {
@@ -1036,12 +1036,12 @@ namespace aiPonybot {
         return isNaN(num) ? -1 : num
     }
 
-   function getValue(data: string, key: string): string {
+    function getValue(data: string, key: string): string {
         let start = data.indexOf(key)
         if (start < 0) return ""
         let end = data.length
         
-        // [수정됨] 배열에 "I"가 추가되었습니다.
+        // 사물인식, 컬러인식용 구분자 모음
         const keys = ["x", "y", "w", "h", "d", "I", "R", "G", "B", "\n"]
         
         for (let k of keys) {
@@ -1105,6 +1105,114 @@ namespace aiPonybot {
             case ColorDataType.I: return "I"
             default: return ""
         }
+    }
+
+    // --- [NEW] 얼굴인식 및 핸드포즈 추가 섹션 ---
+
+    export enum FaceDataType {
+        //% block="X 좌표"
+        X,
+        //% block="Y 좌표"
+        Y,
+        //% block="거리(Z)"
+        Z,
+        //% block="좌우회전(Yaw)"
+        Yaw,
+        //% block="상하각도(Pitch)"
+        Pitch,
+        //% block="입벌림"
+        Mouth,
+        //% block="왼쪽 눈"
+        LeftEye,
+        //% block="오른쪽 눈"
+        RightEye,
+        //% block="기울기(Roll)"
+        Roll,
+        //% block="웃음"
+        Smile,
+        //% block="얼굴 감지 여부"
+        Visible
+    }
+
+    export enum HandDataType {
+        //% block="왼쪽 방향"
+        LeftDir,
+        //% block="왼쪽 속도"
+        LeftSpeed,
+        //% block="오른쪽 방향"
+        RightDir,
+        //% block="오른쪽 속도"
+        RightSpeed
+    }
+
+    //% group="AI 데이터 활용"
+    //% block="블루투스 수신 값: %data 에서 얼굴 %type 추출"
+    //% weight=68
+    export function parseFaceUnified(data: string, type: FaceDataType): number {
+        // 데이터 길이 체크 (19자리) 및 예외처리
+        if (data == "stop" || data.length < 19) return -1;
+
+        // 고정 인덱스 파싱
+        let valStr = "";
+        switch (type) {
+            case FaceDataType.X: valStr = data.substr(0, 2); break;
+            case FaceDataType.Y: valStr = data.substr(2, 2); break;
+            case FaceDataType.Z: valStr = data.substr(4, 2); break;
+            case FaceDataType.Yaw: valStr = data.substr(6, 2); break;
+            case FaceDataType.Pitch: valStr = data.substr(8, 2); break;
+            case FaceDataType.Mouth: valStr = data.substr(10, 2); break;
+            case FaceDataType.LeftEye: valStr = data.substr(12, 2); break;
+            case FaceDataType.RightEye: valStr = data.substr(14, 2); break;
+            case FaceDataType.Roll: valStr = data.substr(16, 1); break;
+            case FaceDataType.Smile: valStr = data.substr(17, 1); break;
+            case FaceDataType.Visible: valStr = data.substr(18, 1); break;
+        }
+        
+        let num = parseInt(valStr);
+        return isNaN(num) ? -1 : num;
+    }
+
+    //% group="AI 데이터 활용"
+    //% block="블루투스 수신 값: %data 에서 핸드포즈 %type 을 %format 으로 추출"
+    //% inlineInputMode=inline
+    //% weight=67
+    export function parseHandPoseUnified(data: string, type: HandDataType, format: ReturnFormat): any {
+        // 데이터 길이 체크 (10자리) 및 헤더(L) 확인
+        // 패킷 포맷: L{D}{SSS}R{D}{SSS} (예: LF255RB255)
+        if (data == "stop" || data.length < 10 || data.charAt(0) != "L") {
+             return format == ReturnFormat.String ? "0" : -1;
+        }
+
+        let valStr = "";
+        
+        switch (type) {
+            case HandDataType.LeftDir:
+                valStr = data.charAt(1); // 'F' or 'B'
+                if (format == ReturnFormat.Number) {
+                    // 숫자로 요청 시: 전진(F)=1, 후진(B)=-1, 그외=0
+                    return valStr == "F" ? 1 : (valStr == "B" ? -1 : 0);
+                }
+                return valStr;
+                
+            case HandDataType.LeftSpeed:
+                valStr = data.substr(2, 3); // 3자리 숫자
+                break;
+                
+            case HandDataType.RightDir:
+                valStr = data.charAt(6); // 'F' or 'B'
+                if (format == ReturnFormat.Number) {
+                    return valStr == "F" ? 1 : (valStr == "B" ? -1 : 0);
+                }
+                return valStr;
+                
+            case HandDataType.RightSpeed:
+                valStr = data.substr(7, 3); // 3자리 숫자
+                break;
+        }
+
+        if (format == ReturnFormat.String) return valStr;
+        let num = parseInt(valStr);
+        return isNaN(num) ? 0 : num;
     }
 
     export namespace smbus {
