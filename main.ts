@@ -1004,6 +1004,14 @@ namespace aiPonybot {
         clear();
     }
 
+    //% group="AI 데이터 활용"
+    //% block="블루투스 수신 값: %data 에서 사물 %type 을 %format 으로 추출"
+    //% inlineInputMode=inline
+    //% weight=70
+    export function parseUARTUnified(data: string, type: UARTDataType, format: ReturnFormat): any {
+        if (data == "null" || data == "stop") {
+            return format == ReturnFormat.String ? data : -1
+        }
 //% group="AI 데이터 활용"
     //% block="블루투스 수신 값: %data 에서 사물 %type 을 %format 으로 추출"
     //% inlineInputMode=inline
@@ -1036,6 +1044,23 @@ namespace aiPonybot {
         return isNaN(num) ? -1 : num
     }
 
+    function getValue(data: string, key: string): string {
+        let start = data.indexOf(key)
+        if (start < 0) return ""
+        let end = data.length
+
+        // 사물인식, 컬러인식용 구분자 모음
+        const keys = ["x", "y", "w", "h", "d", "I", "R", "G", "B", "\n"]
+
+        for (let k of keys) {
+            if (k != key) {
+                const i = data.indexOf(k, start + 1)
+                if (i >= 0 && i < end) {
+                    end = i
+                }
+            }
+        }
+        return data.substr(start + 1, end - start - 1)
     function getValue(data: string, key: string): string {
         let start = data.indexOf(key)
         if (start < 0) return ""
@@ -1167,12 +1192,23 @@ namespace aiPonybot {
             case FaceDataType.Smile: valStr = data.substr(17, 1); break;
             case FaceDataType.Visible: valStr = data.substr(18, 1); break;
         }
+
+        let num = parseInt(valStr);
+        return isNaN(num) ? -1 : num;
         
         let num = parseInt(valStr);
         return isNaN(num) ? -1 : num;
     }
 
     //% group="AI 데이터 활용"
+    //% block="블루투스 수신 값: %data 에서 핸드포즈 %type 을 %format 으로 추출"
+    //% inlineInputMode=inline
+    //% weight=67
+    export function parseHandPoseUnified(data: string, type: HandDataType, format: ReturnFormat): any {
+        // 데이터 길이 체크 (10자리) 및 헤더(L) 확인
+        // 패킷 포맷: L{D}{SSS}R{D}{SSS} (예: LF255RB255)
+        if (data == "stop" || data.length < 10 || data.charAt(0) != "L") {
+            return format == ReturnFormat.String ? "0" : -1;
     //% block="블루투스 수신 값: %data 에서 핸드포즈 %type 을 %format 으로 추출"
     //% inlineInputMode=inline
     //% weight=67
@@ -1205,6 +1241,37 @@ namespace aiPonybot {
                 }
                 return valStr;
                 
+            case HandDataType.RightSpeed:
+                valStr = data.substr(7, 3); // 3자리 숫자
+                break;
+        }
+
+        let valStr = "";
+        if (format == ReturnFormat.String) return valStr;
+        let num = parseInt(valStr);
+        return isNaN(num) ? 0 : num;
+    }
+
+        switch (type) {
+            case HandDataType.LeftDir:
+                valStr = data.charAt(1); // 'F' or 'B'
+                if (format == ReturnFormat.Number) {
+                    // 숫자로 요청 시: 전진(F)=1, 후진(B)=-1, 그외=0
+                    return valStr == "F" ? 1 : (valStr == "B" ? -1 : 0);
+                }
+                return valStr;
+
+            case HandDataType.LeftSpeed:
+                valStr = data.substr(2, 3); // 3자리 숫자
+                break;
+
+            case HandDataType.RightDir:
+                valStr = data.charAt(6); // 'F' or 'B'
+                if (format == ReturnFormat.Number) {
+                    return valStr == "F" ? 1 : (valStr == "B" ? -1 : 0);
+                }
+                return valStr;
+
             case HandDataType.RightSpeed:
                 valStr = data.substr(7, 3); // 3자리 숫자
                 break;
@@ -1274,3 +1341,6 @@ namespace aiPonybot {
 
     initialize();
 }
+
+}
+
