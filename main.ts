@@ -1036,11 +1036,14 @@ namespace aiPonybot {
         return isNaN(num) ? -1 : num
     }
 
-    function getValue(data: string, key: string): string {
+   function getValue(data: string, key: string): string {
         let start = data.indexOf(key)
         if (start < 0) return ""
         let end = data.length
-        const keys = ["x", "y", "w", "h", "d", "R", "G", "B", "\n"]
+        
+        // [수정됨] 배열에 "I"가 추가되었습니다.
+        const keys = ["x", "y", "w", "h", "d", "I", "R", "G", "B", "\n"]
+        
         for (let k of keys) {
             if (k != key) {
                 const i = data.indexOf(k, start + 1)
@@ -1071,7 +1074,9 @@ namespace aiPonybot {
         //% block="초록색(G)"
         G,
         //% block="파랑색(B)"
-        B
+        B,
+        //% block="클래스 ID(I)"
+        I
     }
 
     export enum ReturnFormat {
@@ -1097,6 +1102,7 @@ namespace aiPonybot {
             case ColorDataType.R: return "R"
             case ColorDataType.G: return "G"
             case ColorDataType.B: return "B"
+            case ColorDataType.I: return "I"
             default: return ""
         }
     }
