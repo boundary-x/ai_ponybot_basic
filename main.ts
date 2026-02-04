@@ -1004,140 +1004,101 @@ namespace aiPonybot {
         clear();
     }
 
-/**
-     * ==========================================
-     * Boundary X - AI Data Parsing (Stable Version)
-     * 사용자 검증 로직(charAt, substr) 적용
-     * ==========================================
-     */
-
-    // ------------------------------------------
-    // 1. Enums
-    // ------------------------------------------
-    export enum HandType {
-        //% block="왼손(L)"
-        Left,
-        //% block="오른손(R)"
-        Right
-    }
-
-    export enum HandAttribute {
-        //% block="방향 (1:전진, -1:후진)"
-        Direction,
-        //% block="속도 (0~255)"
-        Speed
-    }
-
-    export enum FaceAttribute {
-        Smile = 17, Pitch = 8, Yaw = 6, Roll = 16, Mouth = 10,
-        LeftEye = 12, RightEye = 14, Z = 4, X = 0, Y = 2, Vis = 18
-    }
-
-    export enum AIColorKey { ID, Red, Green, Blue }
-    export enum UARTDataType { X, Y, W, H, D }
-
-    // ------------------------------------------
-    // 2. Hand Pose (RC Car) - 안정화된 로직
-    // ------------------------------------------
-
     //% group="AI 데이터 활용"
-    //% block="[AI 모션인식] %data 가 유효한가?"
-    //% weight=95
-    export function isHandPoseData(data: string): boolean {
-        // 사용자의 "잘 되는 코드" 로직: 길이 10 이상이면 OK
-        // (L로 시작하는지 체크하면 더 좋지만, 데이터가 살짝 깨져도 동작하게 하려면 길이 체크가 우선입니다)
-        return data != null && data.length >= 10 && data.charAt(0) == "L";
-    }
-
-    //% group="AI 데이터 활용"
-    //% block="[AI 모션인식] 블루투스 수신값 : : %data 에서 %hand 의 %attr 추출"
-    //% weight=94
-    export function parseHandPose(data: string, hand: HandType, attr: HandAttribute): number {
-        // 데이터가 없거나 짧으면 0 반환
-        if (!data || data.length < 10) return 0;
-
-        // 인덱스 고정: 왼손(L)은 0, 오른손(R)은 5
-        // (trim()을 쓰지 않아 원본 인덱스를 보존합니다)
-        let startIndex = (hand === HandType.Left) ? 0 : 5;
-
-        if (attr === HandAttribute.Direction) {
-            // L/R 바로 뒷글자 (인덱스 + 1)
-            let dirChar = data.charAt(startIndex + 1);
-            if (dirChar === "F") return 1;
-            if (dirChar === "B") return -1;
-            return 0; // F나 B가 아니면 정지
-        } else {
-            // 속도: 방향 뒷글자부터 3글자 (인덱스 + 2)
-            let speedStr = data.substr(startIndex + 2, 3);
-            let val = parseInt(speedStr);
-            return isNaN(val) ? 0 : val;
+    //% block="블루투스 수신 값: %data 에서 %type 을 %format 으로 추출"
+    //% inlineInputMode=inline
+    //% weight=70
+    export function parseUARTUnified(data: string, type: UARTDataType, format: ReturnFormat): any {
+        if (data == "null" || data == "stop") {
+            return format == ReturnFormat.String ? data : -1
         }
-    }
 
-    // ------------------------------------------
-    // 3. Face Mesh
-    // ------------------------------------------
-    //% group="AI 데이터 활용"
-    //% block="[AI 얼굴인식] %data 가 유효한가?"
-    export function isFaceData(data: string): boolean {
-        return data != null && data.length >= 19;
+        let v = getValue(data, uartKey(type))
+
+        if (format == ReturnFormat.String) return v
+        let num = parseInt(v)
+        return isNaN(num) ? -1 : num
     }
 
     //% group="AI 데이터 활용"
-    //% block="[AI 얼굴인식] 블루투스 수신값 : %data 에서 %attr 추출"
-    export function parseFaceMesh(data: string, attr: FaceAttribute): number {
-        if (!data || data.length < 19) return -1;
-        let length = (attr >= 16) ? 1 : 2; 
-        return parseInt(data.substr(attr, length)) || -1;
-    }
+    //% block="블루투스 수신 값: %data 에서 %color 을 %format 으로 추출"
+    //% inlineInputMode=inline
+    //% weight=69
+    export function parseColorUnified(data: string, color: ColorDataType, format: ReturnFormat): any {
+        if (data == "stop") {
+            return format == ReturnFormat.String ? data : -1
+        }
 
-    // ------------------------------------------
-    // 4. Color / Object (가변 길이 대응)
-    // ------------------------------------------
-    //% group="AI 데이터 활용"
-    //% block="[AI 컬러인식] %data 가 유효한가?"
-    export function isColorData(data: string): boolean {
-        return data != null && data.charAt(0) == "I";
-    }
+        let v = getValue(data, colorKey(color))
 
-    //% group="AI 데이터 활용"
-    //% block="[AI 컬러인식] 블루투스 수신값 : %data 에서 %key 값 추출"
-    export function parseColorExtended(data: string, key: AIColorKey): number {
-        if (data === "stop") return -1;
-        let charKey = "";
-        switch(key){ case AIColorKey.ID: charKey="I"; break; case AIColorKey.Red: charKey="R"; break; case AIColorKey.Green: charKey="G"; break; case AIColorKey.Blue: charKey="B"; break; }
-        let val = getValue(data, charKey);
-        return val === "" ? -1 : parseInt(val);
-    }
-
-    //% group="AI 데이터 활용"
-    //% block="[AI 사물인식] %data 가 유효한가?"
-    export function isObjectData(data: string): boolean {
-        return data != null && data.charAt(0) == "x";
-    }
-
-    //% group="AI 데이터 활용"
-    //% block="[AI 사물인식] 블루투스 수신값 : %data 에서 %type 값 추출"
-    export function parseObjectData(data: string, type: UARTDataType): number {
-        if (data === "stop" || data === "null") return -1;
-        let charKey = "";
-        switch(type){ case UARTDataType.X: charKey="x"; break; case UARTDataType.Y: charKey="y"; break; case UARTDataType.W: charKey="w"; break; case UARTDataType.H: charKey="h"; break; case UARTDataType.D: charKey="d"; break; }
-        let val = getValue(data, charKey);
-        return val === "" ? -1 : parseInt(val);
+        if (format == ReturnFormat.String) return v
+        let num = parseInt(v)
+        return isNaN(num) ? -1 : num
     }
 
     function getValue(data: string, key: string): string {
-        let start = data.indexOf(key);
-        if (start < 0) return "";
-        let end = data.length;
-        const keys = ["x", "y", "w", "h", "d", "R", "G", "B", "I", "L", "\n"];
+        let start = data.indexOf(key)
+        if (start < 0) return ""
+        let end = data.length
+        const keys = ["x", "y", "w", "h", "d", "R", "G", "B", "\n"]
         for (let k of keys) {
             if (k != key) {
-                let i = data.indexOf(k, start + 1);
-                if (i >= 0 && i < end) end = i;
+                const i = data.indexOf(k, start + 1)
+                if (i >= 0 && i < end) {
+                    end = i
+                }
             }
         }
-        return data.substr(start + 1, end - start - 1);
+        return data.substr(start + 1, end - start - 1)
+    }
+
+    export enum UARTDataType {
+        //% block="X 좌표"
+        X,
+        //% block="Y 좌표"
+        Y,
+        //% block="너비"
+        W,
+        //% block="높이"
+        H,
+        //% block="객체 수"
+        D
+    }
+
+    export enum ColorDataType {
+        //% block="빨간색(R)"
+        R,
+        //% block="초록색(G)"
+        G,
+        //% block="파랑색(B)"
+        B
+    }
+
+    export enum ReturnFormat {
+        //% block="문자형"
+        String,
+        //% block="정수형"
+        Number
+    }
+
+    function uartKey(type: UARTDataType): string {
+        switch (type) {
+            case UARTDataType.X: return "x"
+            case UARTDataType.Y: return "y"
+            case UARTDataType.W: return "w"
+            case UARTDataType.H: return "h"
+            case UARTDataType.D: return "d"
+            default: return ""
+        }
+    }
+
+    function colorKey(color: ColorDataType): string {
+        switch (color) {
+            case ColorDataType.R: return "R"
+            case ColorDataType.G: return "G"
+            case ColorDataType.B: return "B"
+            default: return ""
+        }
     }
 
     export namespace smbus {
