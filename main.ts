@@ -1004,10 +1004,6 @@ namespace aiPonybot {
         clear();
     }
 
-//% weight=10 color=#58ACFA icon="\uf057" block="AI ponybot"
-namespace aiPonybot {
-    // ... (기존 모터/센서/OLED 코드는 그대로 두시고, [AI 데이터 인식] 부분만 아래로 교체하세요) ...
-
     /**
      * ==========================================
      * Boundary X - AI Data Parsing (Stable Version)
@@ -1143,7 +1139,6 @@ namespace aiPonybot {
         }
         return data.substr(start + 1, end - start - 1);
     }
-}
 
     export namespace smbus {
         export function writeByte(address: number, register: number, value: number): void {
