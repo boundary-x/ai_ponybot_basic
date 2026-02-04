@@ -1040,7 +1040,7 @@ namespace aiPonybot {
     // 2. Hand Pose (RC Car) - 안정화된 로직
     // ------------------------------------------
 
-    //% group="AI 데이터 인식"
+    //% group="AI 데이터 활용"
     //% block="[AI 모션제어] %data 가 유효한가?"
     //% weight=95
     export function isHandPoseData(data: string): boolean {
@@ -1049,7 +1049,7 @@ namespace aiPonybot {
         return data != null && data.length >= 10 && data.charAt(0) == "L";
     }
 
-    //% group="AI 데이터 인식"
+    //% group="AI 데이터 활용"
     //% block="[AI 모션제어] 블루투스 수신값: %data 에서 %hand 의 %attr 추출"
     //% weight=94
     export function parseHandPose(data: string, hand: HandType, attr: HandAttribute): number {
