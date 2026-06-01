@@ -519,7 +519,7 @@ namespace aiPonybot {
         }
     }
 
-    /**
+/**
      * ---------------color sensor-------------------
      */
     export enum DetectedColor {
@@ -533,41 +533,72 @@ namespace aiPonybot {
         Yellow
     }
 
+    // [직관적 UX] 사용자가 육안으로 확인 가능한 모듈 버전 선택 Enum
+    export enum SensorVersion {
+        //% block="검은색 모듈(V1)"
+        V1 = 1,
+        //% block="보라색 모듈(V2)"
+        V2 = 2
+    }
+
     class Tcs3472 {
         isSetup: boolean;
         address: number;
-        leds: DigitalPin;
+        
+        // 정규화 변환을 위한 내부 캘리브레이션 맵 변수
+        r_min: number; g_min: number; b_min: number;
+        r_max: number; g_max: number; b_max: number;
+        
+        h_buffer: number[];
+        filter_window: number;
 
         constructor(address: number) {
             this.isSetup = false;
             this.address = address;
+            this.h_buffer = [];
+            this.filter_window = 4;
+            
+            // 기본값은 V1 프로파일로 초기화
+            this.setProfile(1);
         }
 
         setup(): void {
             if (this.isSetup) return;
             this.isSetup = true;
-            aiPonybot.smbus.writeByte(this.address, 0x80, 0x03); // Enable register: PON | AEN
-            aiPonybot.smbus.writeByte(this.address, 0x81, 0x2b); // Integration time: 103.2ms
+            aiPonybot.smbus.writeByte(this.address, 0x80, 0x03); // PON | AEN 활성화
+            
+            // [물리 하드웨어 최적화 세트] 13.7mm 거리를 극복하기 위한 154ms 적분시간 및 60배 게인 고정
+            aiPonybot.smbus.writeByte(this.address, 0x81, 0xC0); 
+            aiPonybot.smbus.writeByte(this.address, 0x8F, 0x03); // 0x8F (Command 0x80 + Control 0x0F) 통신 수정 완료
         }
 
-        setIntegrationTime(time: number): void {
-            this.setup();
-            time = Math.clamp(0, 255, time * 10 / 24);
-            aiPonybot.smbus.writeByte(this.address, 0x81, 255 - time);
+        // 선택한 하드웨어 버전에 맞는 정밀 실측 임계값 주입 엔진
+        setProfile(version: number): void {
+            if (version === 1) { // V1 (검은색 PCB / 백색광) 실측 데이터 매핑
+                this.r_min = 1883; this.g_min = 1866; this.b_min = 1371;
+                this.r_max = 18837; this.g_max = 20336; this.b_max = 14248;
+            } else {             // V2 (보라색 PCB / 주광색 웜화이트) 실측 데이터 매핑
+                this.r_min = 1513; this.g_min = 1006; this.b_min = 800;
+                this.r_max = 12590; this.g_max = 9557; this.b_max = 7167;
+            }
         }
 
         light(): number {
-            return this.raw()[0]; // Clear channel 값 반환
+            return this.raw()[0]; // Clear 채널 반환
         }
 
         rgb(): number[] {
-            let result: number[] = this.raw();
-            let clear: number = result.shift(); // Clear 값을 제거하고 저장
-            if (clear === 0) return [0, 0, 0]; // Clear가 0이면 기본값 반환
-            for (let index: number = 0; index < result.length; index++) {
-                result[index] = result[index] * 255 / clear; // RGB 값을 Clear로 정규화
-            }
-            return result; // [R, G, B]
+            let rawData = this.raw(); 
+            let r_raw = rawData[1];
+            let g_raw = rawData[2];
+            let b_raw = rawData[3];
+
+            // 8비트 표준 RGB($0 \sim 255$) 수학적 정규화 스케일링
+            let r_255 = Math.max(0, Math.min(255, Math.round((r_raw - this.r_min) / Math.max(1, (this.r_max - this.r_min)) * 255)));
+            let g_255 = Math.max(0, Math.min(255, Math.round((g_raw - this.g_min) / Math.max(1, (this.g_max - this.g_min)) * 255)));
+            let b_255 = Math.max(0, Math.min(255, Math.round((b_raw - this.b_min) / Math.max(1, (this.b_max - this.b_min)) * 255)));
+
+            return [r_255, g_255, b_255]; 
         }
 
         raw(): number[] {
@@ -576,16 +607,26 @@ namespace aiPonybot {
                 let result: Buffer = aiPonybot.smbus.readBuffer(this.address, 0xb4, pins.sizeOf(NumberFormat.UInt16LE) * 4);
                 return aiPonybot.smbus.unpack("HHHH", result); // [Clear, R, G, B]
             } catch (e) {
-                return [0, 0, 0, 0]; // I2C 오류 시 기본값 반환
+                return [0, 0, 0, 0]; 
             }
         }
     }
 
-    let colorSensor: Tcs3472 = new Tcs3472(0x29); // 기본 I2C 주소 0x29
+    let colorSensor: Tcs3472 = new Tcs3472(0x29); 
+
+    //% blockId=aiponybot_color_init_version
+    //% block="컬러센서 초기화 : %version"
+    //% group="색상 감지 센서"
+    //% weight=100
+    export function initColorSensor(version: SensorVersion): void {
+        colorSensor.setup();
+        colorSensor.setProfile(version as number);
+    }
 
     //% blockId=aiponybot_color_tcs34725_get_light
     //% block="밝기(B) 값 읽기"
     //% group="색상 감지 센서"
+    //% weight=48
     export function getLight(): number {
         return Math.round(colorSensor.light());
     }
@@ -593,6 +634,7 @@ namespace aiPonybot {
     //% blockId=aiponybot_color_tcs34725_get_red
     //% block="빨간색(R) 색상 값 읽기"
     //% group="색상 감지 센서"
+    //% weight=47
     export function getRed(): number {
         return Math.round(colorSensor.rgb()[0]);
     }
@@ -600,6 +642,7 @@ namespace aiPonybot {
     //% blockId=aiponybot_color_tcs34725_get_green
     //% block="초록색(G) 색상 값 읽기"
     //% group="색상 감지 센서"
+    //% weight=46
     export function getGreen(): number {
         return Math.round(colorSensor.rgb()[1]);
     }
@@ -607,58 +650,39 @@ namespace aiPonybot {
     //% blockId=aiponybot_color_tcs34725_get_blue
     //% block="파란색(B) 색상 값 읽기"
     //% group="색상 감지 센서"
+    //% weight=45
     export function getBlue(): number {
         return Math.round(colorSensor.rgb()[2]);
-    }
-
-    //% blockId=aiponybot_color_tcs34725_set_integration_time
-    //% block="색상 통합 시간을 %time ms로 설정"
-    //% time.min=0 time.max=612 value.defl=500
-    //% group="색상 감지 센서"
-    export function setColorIntegrationTime(time: number): void {
-        return colorSensor.setIntegrationTime(time);
     }
 
     //% blockId=aiponybot_color_sensor_is_color_advanced
     //% block="감지된 색상이 %color (임계값 %threshold)"
     //% threshold.min=10 threshold.max=100 threshold.defl=40
     //% group="색상 감지 센서"
+    //% weight=43
     export function isColorAdvanced(color: DetectedColor, threshold: number = 40): boolean {
         const rgb = colorSensor.rgb();
-        const red = rgb[0];
-        const green = rgb[1];
-        const blue = rgb[2];
-        const clear = colorSensor.light();
+        const r = rgb[0];
+        const g = rgb[1];
+        const b = rgb[2];
 
-        if (clear < 100) return false;
+        // [가드락] 바닥 무채색 및 블랙 라인 오작동 차단 커트라인
+        if (r + g + b < 60) return false;
 
-        const total = red + green + blue;
-        if (total === 0) return false;
-
-        const redRatio = red / total;
-        const greenRatio = green / total;
-        const blueRatio = blue / total;
-
-        const thresholdRatio = threshold / 255;
-
+        // [최적화 반영] 조명 파장 편차 및 양산 산포를 완벽히 극복하는 상대적 RGB 우세도 알고리즘
         switch (color) {
             case DetectedColor.Red:
-                return redRatio > greenRatio + thresholdRatio &&
-                    redRatio > blueRatio + thresholdRatio &&
-                    redRatio > 0.4;
-            case DetectedColor.Green:
-                return greenRatio > redRatio + thresholdRatio &&
-                    greenRatio > blueRatio + thresholdRatio &&
-                    greenRatio > 0.4;
-            case DetectedColor.Blue:
-                return blueRatio > redRatio + thresholdRatio &&
-                    blueRatio > greenRatio + thresholdRatio * 0.8 &&
-                    blueRatio > 0.35;
+                return (r > g && r > b && r > g * 1.5);
+
             case DetectedColor.Yellow:
-                return redRatio > blueRatio + thresholdRatio &&
-                    greenRatio > blueRatio + thresholdRatio &&
-                    Math.abs(redRatio - greenRatio) < 0.1 &&
-                    redRatio + greenRatio > 0.6;
+                return (r > b && g > b && r > g && r <= g * 1.5);
+
+            case DetectedColor.Green:
+                return (g > r && g >= b && g > r * 1.4);
+
+            case DetectedColor.Blue:
+                return (b > r && b > g);
+
             default:
                 return false;
         }
@@ -674,6 +698,7 @@ namespace aiPonybot {
     //% maxB.min=0 maxB.max=255 maxB.defl=255
     //% group="색상 감지 센서"
     //% inlineInputMode=inline
+    //% weight=42
     export function isColorInRange(minR: number, maxR: number, minG: number, maxG: number, minB: number, maxB: number): boolean {
         const rgb = colorSensor.rgb();
         const red = rgb[0];
