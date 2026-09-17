@@ -96,14 +96,14 @@ namespace aiPonybot {
     }
 
     export enum Motor {
+        //% block="모터 4"
+        Motor4 = 0x4,
         //% block="모터 1"
         Motor1 = 0x1,
-        //% block="모터 2"
-        Motor2 = 0x2,
         //% block="모터 3"
         Motor3 = 0x3,
-        //% block="모터 4"
-        Motor4 = 0x4
+        //% block="모터 2"
+        Motor2 = 0x2
     }
 
     export enum Direction {
@@ -246,6 +246,7 @@ namespace aiPonybot {
     //% blockId=aiponybot_motor_runMotor block="|%index|모터|%direction|방향|%speed|속도로 회전"
     //% speed.min=0 speed.max=255
     //% index.fieldEditor="gridpicker" index.fieldOptions.columns=2
+    //% index.defl=Motor.Motor1
     //% direction.fieldEditor="gridpicker" direction.fieldOptions.columns=2
     //% group="모터 제어(심화)"
     export function runMotor(index: Motor, direction: Direction, speed: number): void {
@@ -344,6 +345,7 @@ namespace aiPonybot {
     //% weight=0
     //% blockId=aiponybot_motor_stopMotor block="|%index|모터 정지"
     //% index.fieldEditor="gridpicker" index.fieldOptions.columns=2 
+    //% index.defl=Motor.Motor1
     //% group="모터 제어(심화)"
     export function stopMotor(index: Motor) {
         setPwm((4 - index) * 2, 0, 0);
