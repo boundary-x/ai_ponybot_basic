@@ -54,6 +54,31 @@ aiPonybot.showString("Hello!", 0, 0)
 
 ---
 
+## 🎨 Color Sensor Modes (TCS34725)
+
+Use the existing V1/V2 module calibration before reading colors:
+
+```typescript
+aiPonybot.initColorSensor(aiPonybot.SensorVersion.V2) // purple PCB
+aiPonybot.setColorSensorMode(aiPonybot.ColorSensorMode.Fast) // optional
+if (aiPonybot.isColorSensorConnected()) {
+    const red = aiPonybot.getRed()
+}
+```
+
+- **Sensitive (default):** 153.6 ms, 60× gain — legacy V1/V2 profile calibration baseline, most sensitive.
+- **Balanced:** 48 ms, 16× gain — less latency and gain.
+- **Fast:** 24 ms, 16× gain — suitable for experiments with moving color cards (higher noise risk).
+- RGB getters still return **0–255** normalized against the V1/V2 baseline; optional modes use an exposure-ratio approximation, so **recalibration with actual paper, lighting, and sensor distance is recommended**.
+- `getLight()` reports the **raw Clear channel**, which changes with integration time and gain; it is not lux.
+- `isColorAdvanced(color, threshold)` now uses **threshold as required RGB-channel separation (10–100% of the strongest channel)**. Higher values mean stricter classification and may reject weak colors. Existing 40% default can give different results from previous releases; re-test classroom materials.
+- The sensor checks chip ID (0x44/0x4D), waits for oscillator startup, checks AVALID, reads RGBC in one I²C transfer, and reuses a 20-ms snapshot for successive getters.
+- A missing chip gives zero RGB/clear; `isColorSensorConnected()` distinguishes disconnected hardware. The driver returns the latest valid sample on temporary read failure.
+- With no individual black/white Clear-value calibration, black and white are **not** recognized as dedicated colors by `isColorAdvanced`; use `getLight()` and measure thresholds under your exact setup.
+- **Hardware test needed:** verify I²C communication, colors, sensor height, and motor-operation interference on real Ponybot before release.
+
+---
+
 ## 📦 Installation
 
 In MakeCode editor, click **Extensions** → search for:  
