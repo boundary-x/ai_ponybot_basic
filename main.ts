@@ -543,73 +543,157 @@ namespace aiPonybot {
         V2 = 2
     }
 
+    // Keep legacy blocks intact while allowing optional, faster integration modes.
+    export enum ColorSensorMode {
+        //% block="정밀 측정 (154ms / 60배)"
+        Sensitive = 0,
+        //% block="균형 측정 (48ms / 16배)"
+        Balanced = 1,
+        //% block="빠른 측정 (24ms / 16배)"
+        Fast = 2
+    }
+
     class Tcs3472 {
         isSetup: boolean;
         address: number;
-        
-        // 정규화 변환을 위한 내부 캘리브레이션 맵 변수
         r_min: number; g_min: number; b_min: number;
         r_max: number; g_max: number; b_max: number;
-        
-        h_buffer: number[];
-        filter_window: number;
+
+        // Defaults preserve the original V1/V2 calibration measurements.
+        integrationRegister: number;
+        integrationMs: number;
+        gainRegister: number;
+        gainMultiplier: number;
+        lastRaw: number[];
+        lastReadMs: number;
+        hasSample: boolean;
 
         constructor(address: number) {
             this.isSetup = false;
             this.address = address;
-            this.h_buffer = [];
-            this.filter_window = 4;
-            
-            // 기본값은 V1 프로파일로 초기화
+            this.integrationRegister = 0xC0;
+            this.integrationMs = 153.6;
+            this.gainRegister = 0x03;
+            this.gainMultiplier = 60;
+            this.lastRaw = [0, 0, 0, 0];
+            this.lastReadMs = 0;
+            this.hasSample = false;
             this.setProfile(1);
         }
 
-        setup(): void {
-            if (this.isSetup) return;
-            this.isSetup = true;
-            aiPonybot.smbus.writeByte(this.address, 0x80, 0x03); // PON | AEN 활성화
-            
-            // [물리 하드웨어 최적화 세트] 13.7mm 거리를 극복하기 위한 154ms 적분시간 및 60배 게인 고정
-            aiPonybot.smbus.writeByte(this.address, 0x81, 0xC0); 
-            aiPonybot.smbus.writeByte(this.address, 0x8F, 0x03); // 0x8F (Command 0x80 + Control 0x0F) 통신 수정 완료
+        connected(): boolean {
+            try {
+                const id = aiPonybot.smbus.readNumber(this.address, 0x92, NumberFormat.UInt8LE);
+                // TCS3472-family IDs (34721/25 = 0x44, 34723/27 = 0x4D).
+                return id === 0x44 || id === 0x4D;
+            } catch (e) {
+                return false;
+            }
         }
 
-        // 선택한 하드웨어 버전에 맞는 정밀 실측 임계값 주입 엔진
+        setup(): void {
+            if (this.isSetup || !this.connected()) return;
+            try {
+                // The oscillator must be powered for at least 2.4ms before AEN.
+                aiPonybot.smbus.writeByte(this.address, 0x80, 0x01); // PON
+                control.waitMicros(3000);
+                aiPonybot.smbus.writeByte(this.address, 0x81, this.integrationRegister);
+                aiPonybot.smbus.writeByte(this.address, 0x8F, this.gainRegister);
+                aiPonybot.smbus.writeByte(this.address, 0x80, 0x03); // PON | AEN
+                basic.pause(Math.ceil(this.integrationMs + 5));
+                this.isSetup = true;
+                this.hasSample = false;
+            } catch (e) {
+                this.isSetup = false;
+            }
+        }
+
+        setMode(mode: ColorSensorMode): void {
+            if (mode === ColorSensorMode.Fast) {
+                this.integrationRegister = 0xF6; // 10 x 2.4ms
+                this.integrationMs = 24;
+                this.gainRegister = 0x02; // 16x
+                this.gainMultiplier = 16;
+            } else if (mode === ColorSensorMode.Balanced) {
+                this.integrationRegister = 0xEC; // 20 x 2.4ms
+                this.integrationMs = 48;
+                this.gainRegister = 0x02; // 16x
+                this.gainMultiplier = 16;
+            } else {
+                this.integrationRegister = 0xC0; // 64 x 2.4ms
+                this.integrationMs = 153.6;
+                this.gainRegister = 0x03; // 60x
+                this.gainMultiplier = 60;
+            }
+
+            this.hasSample = false;
+            if (!this.isSetup) return;
+
+            try {
+                aiPonybot.smbus.writeByte(this.address, 0x80, 0x01); // stop ADC
+                aiPonybot.smbus.writeByte(this.address, 0x81, this.integrationRegister);
+                aiPonybot.smbus.writeByte(this.address, 0x8F, this.gainRegister);
+                aiPonybot.smbus.writeByte(this.address, 0x80, 0x03); // restart ADC
+                basic.pause(Math.ceil(this.integrationMs + 5));
+            } catch (e) {
+                this.isSetup = false;
+            }
+        }
+
+        // V1/V2 baseline values were measured at 153.6ms / 60x.
         setProfile(version: number): void {
-            if (version === 1) { // V1 (검은색 PCB / 백색광) 실측 데이터 매핑
+            if (version === 1) {
                 this.r_min = 1883; this.g_min = 1866; this.b_min = 1371;
                 this.r_max = 18837; this.g_max = 20336; this.b_max = 14248;
-            } else {             // V2 (보라색 PCB / 주광색 웜화이트) 실측 데이터 매핑
+            } else {
                 this.r_min = 1513; this.g_min = 1006; this.b_min = 800;
                 this.r_max = 12590; this.g_max = 9557; this.b_max = 7167;
             }
         }
 
         light(): number {
-            return this.raw()[0]; // Clear 채널 반환
+            return this.raw()[0]; // Clear ADC, not a normalized lux reading.
         }
 
         rgb(): number[] {
-            let rawData = this.raw(); 
-            let r_raw = rawData[1];
-            let g_raw = rawData[2];
-            let b_raw = rawData[3];
-
-            // 8비트 표준 RGB($0 \sim 255$) 수학적 정규화 스케일링
-            let r_255 = Math.max(0, Math.min(255, Math.round((r_raw - this.r_min) / Math.max(1, (this.r_max - this.r_min)) * 255)));
-            let g_255 = Math.max(0, Math.min(255, Math.round((g_raw - this.g_min) / Math.max(1, (this.g_max - this.g_min)) * 255)));
-            let b_255 = Math.max(0, Math.min(255, Math.round((b_raw - this.b_min) / Math.max(1, (this.b_max - this.b_min)) * 255)));
-
-            return [r_255, g_255, b_255]; 
+            const data = this.raw();
+            // Map fast/low-gain measurements to the legacy calibration exposure.
+            // Approximation only: ADC saturation/nonlinear lighting cannot be corrected.
+            const exposureRatio = (153.6 * 60) / (this.integrationMs * this.gainMultiplier);
+            const red = data[1] * exposureRatio;
+            const green = data[2] * exposureRatio;
+            const blue = data[3] * exposureRatio;
+            const r = Math.round(Math.max(0, Math.min(255,
+                (red - this.r_min) * 255 / Math.max(1, this.r_max - this.r_min))));
+            const g = Math.round(Math.max(0, Math.min(255,
+                (green - this.g_min) * 255 / Math.max(1, this.g_max - this.g_min))));
+            const b = Math.round(Math.max(0, Math.min(255,
+                (blue - this.b_min) * 255 / Math.max(1, this.b_max - this.b_min))));
+            return [r, g, b];
         }
 
         raw(): number[] {
             this.setup();
+            if (!this.isSetup) return [0, 0, 0, 0];
+
+            const now = control.millis();
+            // Share one RGBC snapshot across getRed/getGreen/getBlue calls.
+            if (this.hasSample && now - this.lastReadMs < 20) return this.lastRaw;
+
             try {
-                let result: Buffer = aiPonybot.smbus.readBuffer(this.address, 0xb4, pins.sizeOf(NumberFormat.UInt16LE) * 4);
-                return aiPonybot.smbus.unpack("HHHH", result); // [Clear, R, G, B]
+                const status = aiPonybot.smbus.readNumber(this.address, 0x93, NumberFormat.UInt8LE);
+                if ((status & 0x01) === 0) {
+                    // AVALID=0: do not treat an incomplete conversion as a color.
+                    return this.hasSample ? this.lastRaw : [0, 0, 0, 0];
+                }
+                const buffer = aiPonybot.smbus.readBuffer(this.address, 0xB4, 8);
+                if (buffer.length !== 8) return this.hasSample ? this.lastRaw : [0, 0, 0, 0];
+                this.lastRaw = aiPonybot.smbus.unpack("HHHH", buffer); // [C,R,G,B]
+                this.lastReadMs = now;
+                this.hasSample = true;
+                return this.lastRaw;
             } catch (e) {
-                return [0, 0, 0, 0]; 
+                return this.hasSample ? this.lastRaw : [0, 0, 0, 0];
             }
         }
     }
@@ -621,8 +705,25 @@ namespace aiPonybot {
     //% group="색상 감지 센서"
     //% weight=100
     export function initColorSensor(version: SensorVersion): void {
-        colorSensor.setup();
         colorSensor.setProfile(version as number);
+        colorSensor.setup();
+    }
+
+    //% blockId=aiponybot_color_sensor_set_mode
+    //% block="컬러센서 측정 모드: %mode"
+    //% mode.fieldEditor="gridpicker" mode.fieldOptions.columns=1
+    //% group="색상 감지 센서"
+    //% weight=99
+    export function setColorSensorMode(mode: ColorSensorMode): void {
+        colorSensor.setMode(mode);
+    }
+
+    //% blockId=aiponybot_color_sensor_connected
+    //% block="컬러센서 연결 확인"
+    //% group="색상 감지 센서"
+    //% weight=49
+    export function isColorSensorConnected(): boolean {
+        return colorSensor.connected();
     }
 
     //% blockId=aiponybot_color_tcs34725_get_light
@@ -664,27 +765,27 @@ namespace aiPonybot {
     //% weight=43
     export function isColorAdvanced(color: DetectedColor, threshold: number = 40): boolean {
         const rgb = colorSensor.rgb();
-        const r = rgb[0];
-        const g = rgb[1];
-        const b = rgb[2];
+        const r = rgb[0], g = rgb[1], b = rgb[2];
+        const peak = Math.max(r, Math.max(g, b));
+        // Retain the legacy dark-floor rejection guard.
+        if (r + g + b < 60 || peak <= 0) return false;
 
-        // [가드락] 바닥 무채색 및 블랙 라인 오작동 차단 커트라인
-        if (r + g + b < 60) return false;
+        // Threshold now controls required color separation as % of peak.
+        // Higher values are stricter; 40 is the original block default.
+        const pct = Math.max(10, Math.min(100, threshold));
+        const gap = peak * pct / 100;
 
-        // [최적화 반영] 조명 파장 편차 및 양산 산포를 완벽히 극복하는 상대적 RGB 우세도 알고리즘
         switch (color) {
             case DetectedColor.Red:
-                return (r > g && r > b && r > g * 1.5);
-
-            case DetectedColor.Yellow:
-                return (r > b && g > b && r > g && r <= g * 1.5);
-
+                return r > g && r > b && r - Math.max(g, b) >= gap;
             case DetectedColor.Green:
-                return (g > r && g >= b && g > r * 1.4);
-
+                return g > r && g > b && g - Math.max(r, b) >= gap;
             case DetectedColor.Blue:
-                return (b > r && b > g);
-
+                return b > r && b > g && b - Math.max(r, g) >= gap;
+            case DetectedColor.Yellow:
+                // Yellow: both red and green strong, blue suppressed.
+                return r >= g * 0.75 && r <= g * 1.55
+                    && Math.min(r, g) - b >= gap;
             default:
                 return false;
         }
@@ -707,9 +808,9 @@ namespace aiPonybot {
         const green = rgb[1];
         const blue = rgb[2];
 
-        return red > minR && red < maxR &&
-            green > minG && green < maxG &&
-            blue > minB && blue < maxB;
+        return red >= minR && red <= maxR &&
+            green >= minG && green <= maxG &&
+            blue >= minB && blue <= maxB;
     }
 
     /**
@@ -1260,13 +1361,13 @@ namespace aiPonybot {
         export function readBuffer(address: number, register: number, length: number): Buffer {
             let temp = pins.createBuffer(1);
             temp[0] = register;
-            pins.i2cWriteBuffer(address, temp, false);
+            pins.i2cWriteBuffer(address, temp, true);
             return pins.i2cReadBuffer(address, length, false);
         }
         export function readNumber(address: number, register: number, format: NumberFormat = NumberFormat.UInt8LE): number {
             let temp = pins.createBuffer(1);
             temp[0] = register;
-            pins.i2cWriteBuffer(address, temp, false);
+            pins.i2cWriteBuffer(address, temp, true);
             return pins.i2cReadNumber(address, format, false);
         }
         export function unpack(format: string, buffer: Buffer): number[] {
